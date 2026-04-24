@@ -516,55 +516,91 @@ with tab3:
             _no_data()
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  TAB 4 — CLASSIFICATION
+#  TAB 4 — CLASSIFICATION (RANDOM FOREST)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
-    if len(df) < MIN_ROWS_ML:
-        st.warning(f"Au moins {MIN_ROWS_ML} enregistrements nécessaires pour la classification.")
+    st.markdown('<div class="section-title">Classification par Intelligence Artificielle</div>', unsafe_allow_html=True)
+    
+    # Fail-safe 1: Ensure we have at least two different health categories to compare
+    if df["health_status"].nunique() < 2:
+        st.warning("⚠️ L'IA a besoin de données variées. Actuellement, tous les profils appartiennent à la même catégorie. Ajoutez un profil 'Sain' (beaucoup de sommeil, peu de stress) ou un profil 'À Risque' pour activer l'entraînement.")
     else:
-        clf, report, cm, importances, y_te, y_pred_rf = run_random_forest(df)
-        col1, col2 = st.columns(2)
-        with col1:
-            cm_df = pd.DataFrame(cm, index=["Réel:Healthy", "Réel:Risk"], columns=["Prédit:Healthy", "Prédit:Risk"])
-            fig = px.imshow(cm_df, text_auto=True, color_continuous_scale=SEQ_BLUES, title="Matrice de Confusion")
-            fig.update_layout(xaxis=dict(side="bottom"), **PLOTLY_THEME)
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            fig = px.bar(x=list(importances.keys()), y=list(importances.values()), color=list(importances.values()), color_continuous_scale=SEQ_VIRIDIS, title="Importance Variables")
-            fig.update_layout(showlegend=False, **PLOTLY_THEME)
-            st.plotly_chart(fig, use_container_width=True)
-
-        st.metric("Précision globale (Accuracy)", f"{report.get('accuracy', 0)*100:.1f}%")
+        X = df[FEATURES]
+        y = df["health_status"]
+        
+        # Fail-safe 2: Prevent train_test_split crash on small datasets
+        min_class_count = y.value_counts().min()
+        
+        if len(df) < 10 or min_class_count < 2:
+            st.info("💡 Mode 'Petit Jeu de Données' activé : L'IA utilise 100% des données pour l'apprentissage sans division de test.")
+            X_train, X_test, y_train, y_test = X, X, y, y
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+            
+        # Train the model
+        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf.fit(X_train, y_train)
+        y_pred = clf.predict(X_test)
+        
+        # Feature Importance Chart
+        importances = pd.DataFrame({'Variable': FEATURES, 'Importance': clf.feature_importances_}).sort_values('Importance', ascending=False)
+        fig_rf = px.bar(importances, x='Variable', y='Importance', color='Importance', title="Quels facteurs prédisent le mieux la santé mentale ?")
+        fig_rf.update_layout(template="plotly_white", font=dict(family="Inter", size=12))
+        st.plotly_chart(fig_rf, use_container_width=True)
+        
+        # Display Insight
+        st.markdown(f"""
+        <div class="info-box">
+        💡 <b>Insight Principal :</b> La variable <b>{importances.iloc[0]['Variable']}</b> est actuellement le prédicteur le plus influent de la santé mentale dans votre groupe.
+        </div>
+        """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  TAB 5 — CLUSTERING
+#  TAB 5 — CLUSTERING (K-MEANS)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab5:
-    if len(df) < MIN_ROWS_ML:
-        st.warning(f"Au moins {MIN_ROWS_ML} enregistrements nécessaires pour le clustering.")
+    st.markdown('<div class="section-title">Segmentation Automatique (Groupes K-Means)</div>', unsafe_allow_html=True)
+    
+    # Fail-safe 3: Prevent KMeans from asking for more clusters than we have data points
+    if len(df) < 3:
+        st.warning(f"⚠️ Au moins 3 enregistrements sont nécessaires pour lancer l'algorithme de clustering. Vous en avez actuellement {len(df)}.")
     else:
-        k = st.slider("Nombre de clusters K", 2, min(6, len(df)), 3)
-        labels_km, _ = run_kmeans(df, k=k)
+        # Dynamically set the max slider value so it never exceeds the number of rows
+        max_clusters = min(6, len(df))
+        default_clusters = min(3, max_clusters)
+        
+        k = st.slider("Nombre de clusters K", 2, int(max_clusters), int(default_clusters))
+        
+        scaler = StandardScaler()
+        X_clust = scaler.fit_transform(df[FEATURES + [TARGET]])
+        
+        # Train KMeans
+        km = KMeans(n_clusters=k, n_init=10, random_state=42).fit(X_clust)
         df_cluster = df.copy()
-        df_cluster["cluster"] = [f"Profil {c+1}" for c in labels_km]
-
+        df_cluster["Cluster"] = [f"Profil {i+1}" for i in km.labels_]
+        
         col1, col2 = st.columns(2)
+        
         with col1:
-            if not df_cluster.empty and df_cluster["sleep_hours"].nunique() > 1:
-                fig7 = px.scatter(df_cluster, x="sleep_hours", y="mood_score", color="cluster", size="stress", title="Clusters — Sommeil vs Humeur", color_discrete_sequence=QUAL_PALETTE)
-                fig7.update_layout(**PLOTLY_THEME)
-                st.plotly_chart(fig7, use_container_width=True)
-            else:
-                _no_data()
-
+            fig_clust1 = px.scatter(df_cluster, x="sleep_hours", y=TARGET, color="Cluster", size="stress", title="Clusters — Sommeil vs Humeur")
+            fig_clust1.update_layout(template="plotly_white", font=dict(family="Inter", size=12))
+            st.plotly_chart(fig_clust1, use_container_width=True)
+            
         with col2:
-            if not df_cluster.empty and df_cluster["stress"].nunique() > 1:
-                fig8 = px.scatter(df_cluster, x="stress", y="social_interaction", color="cluster", size="mood_score", title="Clusters — Stress vs Social", color_discrete_sequence=QUAL_PALETTE)
-                fig8.update_layout(**PLOTLY_THEME)
-                st.plotly_chart(fig8, use_container_width=True)
-            else:
-                _no_data()
+            fig_clust2 = px.scatter(df_cluster, x="stress", y="social_interaction", color="Cluster", size=TARGET, title="Clusters — Stress vs Social")
+            fig_clust2.update_layout(template="plotly_white", font=dict(family="Inter", size=12))
+            st.plotly_chart(fig_clust2, use_container_width=True)
+            
+        st.markdown('<div class="section-title">Analyse Moyenne par Profil</div>', unsafe_allow_html=True)
+        summary = df_cluster.groupby("Cluster").agg(
+            Effectif=("mood_score", "count"),
+            Humeur_Moyenne=("mood_score", lambda x: round(x.mean(), 1)),
+            Sommeil_Moyen=("sleep_hours", lambda x: round(x.mean(), 1)),
+            Stress_Moyen=("stress", lambda x: round(x.mean(), 1)),
+            Social_Moyen=("social_interaction", lambda x: round(x.mean(), 1))
+        ).reset_index()
+        
+        st.dataframe(summary.style.highlight_max(axis=0, color="#d4edda"), use_container_width=True)
 
 st.divider()
 st.markdown("<p style='text-align:center;color:#9aa5b1;font-size:.78rem;'>INF 232 EC2 · Supabase · scikit-learn · Plotly</p>", unsafe_allow_html=True)
