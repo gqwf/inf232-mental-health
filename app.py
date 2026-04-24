@@ -429,31 +429,25 @@ with tab1:
     st.markdown('<div class="section-title">Distribution des variables</div>', unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
- with col1:
-        # Check for variety in mood scores before graphing
+with col1:
         if not df.empty and df['mood_score'].nunique() > 1:
             fig = px.histogram(df, x="mood_score", nbins=10,
                                color_discrete_sequence=[CLR_MAIN],
                                title="Distribution du Score d'Humeur",
                                labels={"mood_score": "Score d'humeur"}, **PLOTLY_THEME)
-            fig.update_traces(opacity=0.80, marker_line_color="white", marker_line_width=0.5)
-            fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("📊 Les graphiques s'afficheront avec plus de données variées.")
+            st.info("📊 Plus de données variées nécessaires.")
 
     with col2:
-        # Check for variety in sleep hours before graphing
         if not df.empty and df['sleep_hours'].nunique() > 1:
             fig = px.histogram(df, x="sleep_hours", nbins=10,
                                color_discrete_sequence=[CLR_SECONDARY],
                                title="Distribution des Heures de Sommeil",
                                labels={"sleep_hours": "Heures de sommeil"}, **PLOTLY_THEME)
-            fig.update_traces(opacity=0.80, marker_line_color="white", marker_line_width=0.5)
-            fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("📊 Plus de données sont nécessaires ici.")
+            st.info("📊 En attente de données.")
 
     col3, col4 = st.columns(2)
     with col3:
