@@ -430,7 +430,7 @@ with tab1:
 
     col1, col2 = st.columns(2)
     with col1:
-        fig = px.histogram(df, x="mood_score", nbins=None,
+        fig = px.histogram(df, x="mood_score", nbins=5,
                            color_discrete_sequence=[CLR_MAIN],
                            title="Distribution du Score d'Humeur",
                            labels={"mood_score": "Score d'humeur"}, **PLOTLY_THEME)
