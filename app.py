@@ -430,7 +430,6 @@ with tab1:
 
     col1, col2 = st.columns(2)
     with col1:
-      # FIX: Check for data variety before drawing the histogram
         if not df.empty and df['mood_score'].nunique() > 1:
             fig = px.histogram(df, x="mood_score", nbins=10,
                                color_discrete_sequence=[CLR_MAIN],
@@ -440,16 +439,19 @@ with tab1:
             fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("📊 Les graphiques de distribution s'afficheront dès que les participants auront des scores d'humeur variés.")
+            st.info("📊 Les graphiques s'afficheront avec plus de données variées.")
 
     with col2:
-        fig = px.histogram(df, x="sleep_hours", nbins=20,
-                           color_discrete_sequence=[CLR_SECONDARY],
-                           title="Distribution des Heures de Sommeil",
-                           labels={"sleep_hours": "Heures de sommeil"}, **PLOTLY_THEME)
-        fig.update_traces(opacity=0.80, marker_line_color="white", marker_line_width=0.5)
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        if not df.empty and df['sleep_hours'].nunique() > 1:
+            fig = px.histogram(df, x="sleep_hours", nbins=10,
+                               color_discrete_sequence=[CLR_SECONDARY],
+                               title="Distribution des Heures de Sommeil",
+                               labels={"sleep_hours": "Heures de sommeil"}, **PLOTLY_THEME)
+            fig.update_traces(opacity=0.80, marker_line_color="white", marker_line_width=0.5)
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("📊 Plus de données sont nécessaires ici.")
 
     col3, col4 = st.columns(2)
     with col3:
