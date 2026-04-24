@@ -75,11 +75,7 @@ section[data-testid="stSidebar"] .stTextInput > div > div > input {
     color: #1a1a2e;
     margin: 0 0 .3rem 0;
 }
-.page-header p {
-    color: #5f6b7a;
-    font-size: .88rem;
-    margin: 0;
-}
+.page-header p { color: #5f6b7a; font-size: .88rem; margin: 0; }
 
 /* ── Section headings ── */
 .section-title {
@@ -164,7 +160,7 @@ h1, h2, h3, h4 { font-family: 'Source Serif 4', serif; color: #1a1a2e; }
 """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  PLOTLY THEME — plotly_white, professional palette
+#  PLOTLY THEME — plotly_white, professional academic palette
 # ══════════════════════════════════════════════════════════════════════════════
 PLOTLY_THEME = dict(
     template="plotly_white",
@@ -182,19 +178,30 @@ SEQ_VIRIDIS   = "Viridis"
 QUAL_PALETTE  = ["#1a73e8", "#34a853", "#ea4335", "#fbbc04", "#4285f4", "#ff6d00"]
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FIX 1 & 2 — SUPABASE: read from st.secrets, use correct table name
+#  HELPER — reusable "not enough data" notice shown instead of crashing charts
 # ══════════════════════════════════════════════════════════════════════════════
-TABLE = "mental_health_data"   # FIX 2 — single source of truth for table name
+_MSG_INSUFF = "Données insuffisantes pour générer ce graphique. Continuez la collecte !"
+
+def _insufficient():
+    """Render the standard fallback message (requirement 2)."""
+    st.info(_MSG_INSUFF)
+
+def _can_plot(df: pd.DataFrame, *cols: str) -> bool:
+    """
+    Return True only when df is non-empty AND every listed column has
+    more than one unique value — the exact condition from requirement 1.
+    """
+    if df.empty:
+        return False
+    return all(df[c].nunique() > 1 for c in cols if c in df.columns)
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SUPABASE — read credentials from st.secrets
+# ══════════════════════════════════════════════════════════════════════════════
+TABLE = "mental_health_data"
 
 @st.cache_resource
 def get_supabase_client() -> Client:
-    """
-    Reads credentials from the exact secrets path the user configured:
-        [connections.supabase]
-        SUPABASE_URL = "..."
-        SUPABASE_KEY = "..."
-    Shows a clear, actionable error instead of silently falling back to demo data.
-    """
     try:
         url = st.secrets["connections"]["supabase"]["SUPABASE_URL"]
         key = st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
@@ -222,7 +229,7 @@ def save_record(client: Client, record: dict) -> tuple[bool, str]:
 
 @st.cache_data(ttl=30)
 def load_data(_client: Client) -> pd.DataFrame:
-    """Fetch all rows from Supabase (cached 30 s). Returns empty DataFrame on failure."""
+    """Fetch all rows from Supabase (cached 30 s). Returns empty DataFrame on any failure."""
     try:
         resp = _client.table(TABLE).select("*").execute()
         df = pd.DataFrame(resp.data)
@@ -231,7 +238,9 @@ def load_data(_client: Client) -> pd.DataFrame:
         for col in ["sleep_hours", "stress", "social_interaction", "mood_score"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-        return df.dropna(subset=["sleep_hours", "stress", "social_interaction", "mood_score"])
+        return df.dropna(
+            subset=["sleep_hours", "stress", "social_interaction", "mood_score"]
+        )
     except Exception as e:
         st.error(f"Erreur lors du chargement des données : {e}")
         return pd.DataFrame()
@@ -241,7 +250,7 @@ def load_data(_client: Client) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════════════════════
 FEATURES    = ["sleep_hours", "stress", "social_interaction"]
 TARGET      = "mood_score"
-MIN_ROWS_ML = 3   # minimum rows required by ML algorithms (KMeans, RF, PCA)
+MIN_ROWS_ML = 3   # minimum rows for ML algorithms (PCA, RF, KMeans)
 
 
 def add_health_label(df: pd.DataFrame) -> pd.DataFrame:
@@ -327,8 +336,8 @@ with st.sidebar:
         if not name.strip() or not matricule.strip():
             st.warning("Veuillez remplir le Nom et le Matricule.")
         else:
-            supabase_client = get_supabase_client()
-            ok, msg = save_record(supabase_client, {
+            _client = get_supabase_client()
+            ok, msg = save_record(_client, {
                 "name":               name.strip(),
                 "matricule":          matricule.strip(),
                 "sleep_hours":        sleep_hours,
@@ -344,13 +353,13 @@ with st.sidebar:
     st.caption(f"Table Supabase : {TABLE}")
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LOAD DATA FROM SUPABASE
+#  LOAD DATA
 # ══════════════════════════════════════════════════════════════════════════════
 supabase_client = get_supabase_client()
 df_raw = load_data(supabase_client)
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  PAGE HEADER  (FIX 4 — exact required title)
+#  PAGE HEADER
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
 <div class="page-header">
@@ -360,8 +369,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FIX 3 — EMPTY DATABASE GUARD
-#  Stops all chart rendering if the table is empty, preventing TypeError crashes.
+#  EMPTY DATABASE GUARD
+#  If the table has no rows, show a friendly prompt and stop rendering charts.
 # ══════════════════════════════════════════════════════════════════════════════
 if df_raw.empty:
     st.warning(
@@ -372,7 +381,7 @@ if df_raw.empty:
         "👈 Utilisez le formulaire dans la barre latérale pour saisir vos premières données. "
         "Le tableau de bord s'activera automatiquement dès qu'une ligne est enregistrée."
     )
-    st.stop()   # ← halts execution; no chart code below runs on an empty DataFrame
+    st.stop()
 
 # ── At this point df_raw has at least one valid row ──────────────────────────
 df = add_health_label(df_raw.copy())
@@ -422,57 +431,94 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔵 Clustering",
 ])
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
 #  TAB 1 — APERÇU
-# ─────────────────────────────────────────────────────────────────────────────
+#  Every histogram and scatter is wrapped in `_can_plot()` per requirement 1.
+#  `nbins` is removed from all histograms (requirement 3).
+# ══════════════════════════════════════════════════════════════════════════════
 with tab1:
     st.markdown('<div class="section-title">Distribution des variables</div>', unsafe_allow_html=True)
-    
+
     col1, col2 = st.columns(2)
+
+    # ── Histogram: mood_score ──────────────────────────────────────────────
     with col1:
-        if not df.empty and df['mood_score'].nunique() > 1:
-            fig = px.histogram(df, x="mood_score", nbins=10,
-                               color_discrete_sequence=[CLR_MAIN],
-                               title="Distribution du Score d'Humeur",
-                               labels={"mood_score": "Score d'humeur"}, **PLOTLY_THEME)
+        if not df.empty and df["mood_score"].nunique() > 1:
+            fig = px.histogram(
+                df, x="mood_score",          # nbins intentionally omitted — auto-scaled
+                color_discrete_sequence=[CLR_MAIN],
+                title="Distribution du Score d'Humeur",
+                labels={"mood_score": "Score d'humeur"},
+                **PLOTLY_THEME,
+            )
+            fig.update_traces(opacity=0.80, marker_line_color="white", marker_line_width=0.5)
+            fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("📊 Plus de données variées nécessaires.")
+            _insufficient()
 
+    # ── Histogram: sleep_hours ────────────────────────────────────────────
     with col2:
-        if not df.empty and df['sleep_hours'].nunique() > 1:
-            fig = px.histogram(df, x="sleep_hours", nbins=10,
-                               color_discrete_sequence=[CLR_SECONDARY],
-                               title="Distribution des Heures de Sommeil",
-                               labels={"sleep_hours": "Heures de sommeil"}, **PLOTLY_THEME)
+        if not df.empty and df["sleep_hours"].nunique() > 1:
+            fig = px.histogram(
+                df, x="sleep_hours",         # nbins intentionally omitted — auto-scaled
+                color_discrete_sequence=[CLR_SECONDARY],
+                title="Distribution des Heures de Sommeil",
+                labels={"sleep_hours": "Heures de sommeil"},
+                **PLOTLY_THEME,
+            )
+            fig.update_traces(opacity=0.80, marker_line_color="white", marker_line_width=0.5)
+            fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("📊 En attente de données.")
-            
+            _insufficient()
+
     col3, col4 = st.columns(2)
+
+    # ── Pie chart: health_status ───────────────────────────────────────────
     with col3:
-        fig = px.pie(df, names="health_status", color="health_status",
-                     color_discrete_map={"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK},
-                     title="Répartition Sain / À Risque", hole=0.42, **PLOTLY_THEME)
-        fig.update_traces(textinfo="percent+label", pull=[0.03, 0.03])
-        st.plotly_chart(fig, use_container_width=True)
+        if not df.empty and df["health_status"].nunique() > 0:
+            fig = px.pie(
+                df, names="health_status", color="health_status",
+                color_discrete_map={"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK},
+                title="Répartition Sain / À Risque", hole=0.42, **PLOTLY_THEME,
+            )
+            fig.update_traces(textinfo="percent+label", pull=[0.03, 0.03])
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            _insufficient()
 
+    # ── Correlation heatmap ────────────────────────────────────────────────
     with col4:
-        corr = df[FEATURES + [TARGET]].corr()
-        fig = px.imshow(corr, text_auto=".2f", color_continuous_scale=SEQ_BLUES,
-                        title="Matrice de Corrélation", zmin=-1, zmax=1, **PLOTLY_THEME)
-        st.plotly_chart(fig, use_container_width=True)
+        if _can_plot(df, *FEATURES, TARGET):
+            corr = df[FEATURES + [TARGET]].corr()
+            fig = px.imshow(
+                corr, text_auto=".2f",
+                color_continuous_scale=SEQ_BLUES,
+                title="Matrice de Corrélation", zmin=-1, zmax=1,
+                **PLOTLY_THEME,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            _insufficient()
 
-    if len(df) >= MIN_ROWS_ML:
-        st.markdown('<div class="section-title">Scatter Matrix — Relations entre variables</div>',
-                    unsafe_allow_html=True)
-        fig = px.scatter_matrix(df, dimensions=FEATURES + [TARGET],
-                                color="health_status",
-                                color_discrete_map={"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK},
-                                title="Matrice de dispersion (toutes variables)", **PLOTLY_THEME)
+    # ── Scatter matrix ─────────────────────────────────────────────────────
+    if len(df) >= MIN_ROWS_ML and _can_plot(df, *FEATURES, TARGET):
+        st.markdown(
+            '<div class="section-title">Scatter Matrix — Relations entre variables</div>',
+            unsafe_allow_html=True,
+        )
+        fig = px.scatter_matrix(
+            df, dimensions=FEATURES + [TARGET],
+            color="health_status",
+            color_discrete_map={"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK},
+            title="Matrice de dispersion (toutes variables)",
+            **PLOTLY_THEME,
+        )
         fig.update_traces(diagonal_visible=False, marker=dict(size=3, opacity=0.55))
         st.plotly_chart(fig, use_container_width=True)
 
+    # ── Raw data table ─────────────────────────────────────────────────────
     st.markdown('<div class="section-title">Données brutes</div>', unsafe_allow_html=True)
     display_cols = [c for c in
                     ["name", "matricule", "sleep_hours", "stress",
@@ -480,132 +526,167 @@ with tab1:
                     if c in df.columns]
     st.dataframe(df[display_cols], use_container_width=True, height=300)
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
 #  TAB 2 — RÉGRESSION
-# ─────────────────────────────────────────────────────────────────────────────
+#  Scatter plots for regression line and predicted-vs-actual are each guarded.
+# ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     if len(df) < 2:
         st.warning("Au moins 2 enregistrements sont nécessaires pour la régression.")
     else:
-        # ── Régression Linéaire Simple ──
-        st.markdown('<div class="section-title">Régression Linéaire Simple — Sommeil → Humeur</div>',
-                    unsafe_allow_html=True)
-
-        model_s, r2_s, rmse_s, ypred_s = run_simple_regression(df)
-        x_line = np.linspace(df["sleep_hours"].min(), df["sleep_hours"].max(), 200)
-        y_line = model_s.predict(x_line.reshape(-1, 1))
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=df["sleep_hours"], y=df[TARGET], mode="markers",
-            marker=dict(color=df[TARGET], colorscale=SEQ_VIRIDIS,
-                        size=7, opacity=0.70, showscale=True,
-                        colorbar=dict(title="Humeur", thickness=14)),
-            name="Observations",
-        ))
-        fig.add_trace(go.Scatter(
-            x=x_line, y=y_line, mode="lines",
-            line=dict(color=CLR_AT_RISK, width=2.5),
-            name=f"Droite de régression (R²={r2_s:.3f})",
-        ))
-        fig.update_layout(
-            title="Heures de Sommeil vs Score d'Humeur",
-            xaxis_title="Heures de sommeil", yaxis_title="Score d'humeur",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            **PLOTLY_THEME,
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("R²", f"{r2_s:.4f}")
-        c2.metric("RMSE", f"{rmse_s:.2f}")
-        c3.metric("Coefficient (pente)", f"{model_s.coef_[0]:.3f}")
+        # ── Régression Linéaire Simple ─────────────────────────────────────
         st.markdown(
-            '<div class="info-box">📌 <b>Interprétation :</b> Chaque heure de sommeil supplémentaire '
-            f"est associée à une variation de <b>{model_s.coef_[0]:.2f} points</b> du score d'humeur. "
-            f"Le modèle explique <b>{r2_s*100:.1f}%</b> de la variance (R²={r2_s:.4f}).</div>",
+            '<div class="section-title">Régression Linéaire Simple — Sommeil → Humeur</div>',
             unsafe_allow_html=True,
         )
 
-        # ── Régression Linéaire Multiple ──
-        st.markdown('<div class="section-title">Régression Linéaire Multiple — Tous les facteurs → Humeur</div>',
-                    unsafe_allow_html=True)
+        # Guard: both axes need variance before fitting a line
+        if not df.empty and df["sleep_hours"].nunique() > 1 and df[TARGET].nunique() > 1:
+            model_s, r2_s, rmse_s, ypred_s = run_simple_regression(df)
+            x_line = np.linspace(df["sleep_hours"].min(), df["sleep_hours"].max(), 200)
+            y_line = model_s.predict(x_line.reshape(-1, 1))
 
-        model_m, r2_m, rmse_m, ypred_m, coef_m = run_multiple_regression(df)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=df["sleep_hours"], y=df[TARGET], mode="markers",
+                marker=dict(
+                    color=df[TARGET], colorscale=SEQ_VIRIDIS,
+                    size=7, opacity=0.70, showscale=True,
+                    colorbar=dict(title="Humeur", thickness=14),
+                ),
+                name="Observations",
+            ))
+            fig.add_trace(go.Scatter(
+                x=x_line, y=y_line, mode="lines",
+                line=dict(color=CLR_AT_RISK, width=2.5),
+                name=f"Droite de régression (R²={r2_s:.3f})",
+            ))
+            fig.update_layout(
+                title="Heures de Sommeil vs Score d'Humeur",
+                xaxis_title="Heures de sommeil", yaxis_title="Score d'humeur",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                **PLOTLY_THEME,
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(
-            x=df[TARGET], y=ypred_m, mode="markers",
-            marker=dict(color=CLR_MAIN, opacity=0.55, size=6),
-            name="Prédit vs Réel",
-        ))
-        lims = [df[TARGET].min(), df[TARGET].max()]
-        fig2.add_trace(go.Scatter(x=lims, y=lims, mode="lines",
-                                  line=dict(color=CLR_AT_RISK, dash="dash", width=1.5),
-                                  name="Ligne idéale (y = x)"))
-        fig2.update_layout(
-            title="Valeurs Réelles vs Valeurs Prédites (Régression Multiple)",
-            xaxis_title="Valeurs réelles", yaxis_title="Valeurs prédites",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            **PLOTLY_THEME,
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("R²", f"{r2_s:.4f}")
+            c2.metric("RMSE", f"{rmse_s:.2f}")
+            c3.metric("Coefficient (pente)", f"{model_s.coef_[0]:.3f}")
+            st.markdown(
+                '<div class="info-box">📌 <b>Interprétation :</b> Chaque heure de sommeil '
+                f"supplémentaire est associée à une variation de "
+                f"<b>{model_s.coef_[0]:.2f} points</b> du score d'humeur. "
+                f"Le modèle explique <b>{r2_s*100:.1f}%</b> de la variance "
+                f"(R²={r2_s:.4f}).</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            _insufficient()
 
-        col_a, col_b = st.columns(2)
-        with col_a:
-            ca, cb = st.columns(2)
-            ca.metric("R² multiple", f"{r2_m:.4f}")
-            cb.metric("RMSE", f"{rmse_m:.2f}")
-            st.markdown("**Tableau des coefficients**")
-            coef_df = pd.DataFrame({
-                "Variable":    list(coef_m.keys()),
-                "Coefficient": [round(v, 4) for v in coef_m.values()],
-                "Direction":   ["↑ Positif" if v > 0 else "↓ Négatif" for v in coef_m.values()],
-            })
-            st.dataframe(coef_df, use_container_width=True, hide_index=True)
-
-        with col_b:
-            fig3 = px.bar(x=list(coef_m.keys()), y=list(coef_m.values()),
-                          color=list(coef_m.values()), color_continuous_scale="RdBu",
-                          labels={"x": "Variable", "y": "Coefficient"},
-                          title="Poids des variables explicatives", **PLOTLY_THEME)
-            fig3.update_layout(showlegend=False)
-            st.plotly_chart(fig3, use_container_width=True)
-
-        # ── Résidus ──
-        st.markdown('<div class="section-title">Analyse des Résidus</div>', unsafe_allow_html=True)
-        residuals = df[TARGET].values - ypred_m
-        fig4 = go.Figure()
-        fig4.add_trace(go.Scatter(
-            x=ypred_m, y=residuals, mode="markers",
-            marker=dict(color=residuals, colorscale="RdBu", size=5, opacity=0.65,
-                        colorbar=dict(title="Résidu", thickness=14)),
-            name="Résidus",
-        ))
-        fig4.add_hline(y=0, line_dash="dash", line_color="#666666", line_width=1.5)
-        fig4.update_layout(title="Résidus vs Valeurs Prédites",
-                           xaxis_title="Valeurs prédites", yaxis_title="Résidus",
-                           **PLOTLY_THEME)
-        st.plotly_chart(fig4, use_container_width=True)
+        # ── Régression Linéaire Multiple ───────────────────────────────────
         st.markdown(
-            '<div class="info-box">📌 <b>Résidus :</b> Une dispersion aléatoire autour de zéro confirme '
-            'la bonne spécification du modèle et le respect des hypothèses de la régression.</div>',
+            '<div class="section-title">Régression Linéaire Multiple — Tous les facteurs → Humeur</div>',
             unsafe_allow_html=True,
         )
 
-# ─────────────────────────────────────────────────────────────────────────────
+        if _can_plot(df, *FEATURES, TARGET):
+            model_m, r2_m, rmse_m, ypred_m, coef_m = run_multiple_regression(df)
+
+            # Scatter: réel vs prédit
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(
+                x=df[TARGET], y=ypred_m, mode="markers",
+                marker=dict(color=CLR_MAIN, opacity=0.55, size=6),
+                name="Prédit vs Réel",
+            ))
+            lims = [df[TARGET].min(), df[TARGET].max()]
+            fig2.add_trace(go.Scatter(
+                x=lims, y=lims, mode="lines",
+                line=dict(color=CLR_AT_RISK, dash="dash", width=1.5),
+                name="Ligne idéale (y = x)",
+            ))
+            fig2.update_layout(
+                title="Valeurs Réelles vs Valeurs Prédites (Régression Multiple)",
+                xaxis_title="Valeurs réelles", yaxis_title="Valeurs prédites",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                **PLOTLY_THEME,
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                ca, cb = st.columns(2)
+                ca.metric("R² multiple", f"{r2_m:.4f}")
+                cb.metric("RMSE", f"{rmse_m:.2f}")
+                st.markdown("**Tableau des coefficients**")
+                coef_df = pd.DataFrame({
+                    "Variable":    list(coef_m.keys()),
+                    "Coefficient": [round(v, 4) for v in coef_m.values()],
+                    "Direction":   ["↑ Positif" if v > 0 else "↓ Négatif"
+                                    for v in coef_m.values()],
+                })
+                st.dataframe(coef_df, use_container_width=True, hide_index=True)
+
+            with col_b:
+                fig3 = px.bar(
+                    x=list(coef_m.keys()), y=list(coef_m.values()),
+                    color=list(coef_m.values()), color_continuous_scale="RdBu",
+                    labels={"x": "Variable", "y": "Coefficient"},
+                    title="Poids des variables explicatives",
+                    **PLOTLY_THEME,
+                )
+                fig3.update_layout(showlegend=False)
+                st.plotly_chart(fig3, use_container_width=True)
+
+            # ── Résidus ────────────────────────────────────────────────────
+            st.markdown(
+                '<div class="section-title">Analyse des Résidus</div>',
+                unsafe_allow_html=True,
+            )
+            residuals = df[TARGET].values - ypred_m
+            fig4 = go.Figure()
+            fig4.add_trace(go.Scatter(
+                x=ypred_m, y=residuals, mode="markers",
+                marker=dict(
+                    color=residuals, colorscale="RdBu",
+                    size=5, opacity=0.65,
+                    colorbar=dict(title="Résidu", thickness=14),
+                ),
+                name="Résidus",
+            ))
+            fig4.add_hline(y=0, line_dash="dash", line_color="#666666", line_width=1.5)
+            fig4.update_layout(
+                title="Résidus vs Valeurs Prédites",
+                xaxis_title="Valeurs prédites", yaxis_title="Résidus",
+                **PLOTLY_THEME,
+            )
+            st.plotly_chart(fig4, use_container_width=True)
+            st.markdown(
+                '<div class="info-box">📌 <b>Résidus :</b> Une dispersion aléatoire autour de '
+                'zéro confirme la bonne spécification du modèle et le respect des hypothèses '
+                'de la régression linéaire.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            _insufficient()
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  TAB 3 — ACP / PCA
-# ─────────────────────────────────────────────────────────────────────────────
+#  The PCA scatter and biplot are each wrapped in _can_plot().
+# ══════════════════════════════════════════════════════════════════════════════
 with tab3:
-    # FIX 5: minimum row check for PCA
     if len(df) < MIN_ROWS_ML:
         st.warning(
             f"Au moins {MIN_ROWS_ML} enregistrements sont nécessaires pour l'ACP. "
-            f"Actuellement : {len(df)} ligne(s). Veuillez ajouter plus de données via le formulaire."
+            f"Actuellement : {len(df)} ligne(s). "
+            "Veuillez ajouter plus de données via le formulaire."
         )
     else:
-        st.markdown('<div class="section-title">Analyse en Composantes Principales (ACP / PCA)</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-title">Analyse en Composantes Principales (ACP / PCA)</div>',
+            unsafe_allow_html=True,
+        )
 
         components, explained, loadings = run_pca(df)
         pca_df = pd.DataFrame(components, columns=["PC1", "PC2"])
@@ -614,83 +695,102 @@ with tab3:
         pca_df["name"]          = df["name"].values if "name" in df.columns else "N/A"
 
         col1, col2 = st.columns([2, 1])
+
+        # ── PCA scatter ────────────────────────────────────────────────────
         with col1:
-            fig = px.scatter(
-                pca_df, x="PC1", y="PC2",
-                color="health_status", size="mood_score", size_max=16,
-                color_discrete_map={"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK},
-                hover_name="name",
-                hover_data={"mood_score": True, "health_status": True},
-                title=f"Projection ACP — PC1 ({explained[0]*100:.1f}%)  ·  PC2 ({explained[1]*100:.1f}%)",
-                **PLOTLY_THEME,
-            )
-            fig.update_traces(marker=dict(opacity=0.70, line=dict(width=0.5, color="white")))
-            fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02))
-            st.plotly_chart(fig, use_container_width=True)
+            if not pca_df.empty and pca_df["PC1"].nunique() > 1 and pca_df["PC2"].nunique() > 1:
+                fig = px.scatter(
+                    pca_df, x="PC1", y="PC2",
+                    color="health_status",
+                    size="mood_score", size_max=16,
+                    color_discrete_map={"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK},
+                    hover_name="name",
+                    hover_data={"mood_score": True, "health_status": True},
+                    title=(
+                        f"Projection ACP — "
+                        f"PC1 ({explained[0]*100:.1f}%)  ·  PC2 ({explained[1]*100:.1f}%)"
+                    ),
+                    **PLOTLY_THEME,
+                )
+                fig.update_traces(marker=dict(opacity=0.70, line=dict(width=0.5, color="white")))
+                fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02))
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                _insufficient()
 
         with col2:
             st.markdown("**Variance expliquée**")
             ev_df = pd.DataFrame({
                 "Composante": ["PC1", "PC2"],
                 "Variance (%)": [f"{v*100:.1f}%" for v in explained],
-                "Cumulé (%)":   [f"{explained[:i+1].sum()*100:.1f}%" for i in range(2)],
+                "Cumulé (%)":   [
+                    f"{explained[:i+1].sum()*100:.1f}%" for i in range(2)
+                ],
             })
             st.dataframe(ev_df, use_container_width=True, hide_index=True)
             st.markdown("**Loadings (corrélations variables / axes)**")
             st.dataframe(loadings.round(3), use_container_width=True)
 
-        st.markdown('<div class="section-title">Biplot — Variables et Individus</div>',
-                    unsafe_allow_html=True)
-        fig5 = go.Figure()
-        fig5.add_trace(go.Scatter(
-            x=pca_df["PC1"], y=pca_df["PC2"], mode="markers",
-            marker=dict(
-                color=pca_df["health_status"].map(
-                    {"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK}
-                ),
-                size=5, opacity=0.40,
-            ),
-            name="Individus",
-        ))
-        scale = max(abs(components[:, 0].max()), abs(components[:, 1].max())) * 0.6
-        arrow_colors = [CLR_MAIN, CLR_AT_RISK, CLR_SECONDARY]
-        for i, var in enumerate(FEATURES):
-            l1 = loadings.loc[var, "PC1"] * scale
-            l2 = loadings.loc[var, "PC2"] * scale
-            fig5.add_annotation(
-                ax=0, ay=0, x=l1, y=l2,
-                xref="x", yref="y", axref="x", ayref="y",
-                showarrow=True, arrowhead=3, arrowwidth=2,
-                arrowcolor=arrow_colors[i % len(arrow_colors)],
-                font=dict(color=arrow_colors[i % len(arrow_colors)], size=11),
-                text=var.replace("_", " ").title(),
-            )
-        fig5.update_layout(
-            title="Biplot ACP — Individus et Vecteurs Variables",
-            xaxis_title=f"PC1 ({explained[0]*100:.1f}%)",
-            yaxis_title=f"PC2 ({explained[1]*100:.1f}%)",
-            **PLOTLY_THEME,
-        )
-        st.plotly_chart(fig5, use_container_width=True)
+        # ── Biplot ─────────────────────────────────────────────────────────
         st.markdown(
-            '<div class="info-box">📌 <b>Lecture du biplot :</b> Les flèches indiquent la direction et '
-            "l'intensité de contribution de chaque variable aux axes principaux. "
-            'Des flèches proches signalent des variables fortement corrélées.</div>',
+            '<div class="section-title">Biplot — Variables et Individus</div>',
             unsafe_allow_html=True,
         )
+        if not pca_df.empty and pca_df["PC1"].nunique() > 1 and pca_df["PC2"].nunique() > 1:
+            fig5 = go.Figure()
+            fig5.add_trace(go.Scatter(
+                x=pca_df["PC1"], y=pca_df["PC2"], mode="markers",
+                marker=dict(
+                    color=pca_df["health_status"].map(
+                        {"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK}
+                    ),
+                    size=5, opacity=0.40,
+                ),
+                name="Individus",
+            ))
+            scale = max(abs(components[:, 0].max()), abs(components[:, 1].max())) * 0.6
+            arrow_colors = [CLR_MAIN, CLR_AT_RISK, CLR_SECONDARY]
+            for i, var in enumerate(FEATURES):
+                l1 = loadings.loc[var, "PC1"] * scale
+                l2 = loadings.loc[var, "PC2"] * scale
+                fig5.add_annotation(
+                    ax=0, ay=0, x=l1, y=l2,
+                    xref="x", yref="y", axref="x", ayref="y",
+                    showarrow=True, arrowhead=3, arrowwidth=2,
+                    arrowcolor=arrow_colors[i % len(arrow_colors)],
+                    font=dict(color=arrow_colors[i % len(arrow_colors)], size=11),
+                    text=var.replace("_", " ").title(),
+                )
+            fig5.update_layout(
+                title="Biplot ACP — Individus et Vecteurs Variables",
+                xaxis_title=f"PC1 ({explained[0]*100:.1f}%)",
+                yaxis_title=f"PC2 ({explained[1]*100:.1f}%)",
+                **PLOTLY_THEME,
+            )
+            st.plotly_chart(fig5, use_container_width=True)
+            st.markdown(
+                '<div class="info-box">📌 <b>Lecture du biplot :</b> Les flèches indiquent la '
+                "direction et l'intensité de contribution de chaque variable aux axes principaux. "
+                'Des flèches proches signalent des variables fortement corrélées.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            _insufficient()
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  TAB 4 — CLASSIFICATION  (FIX 5: len(df) < 3 guard)
-# ─────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  TAB 4 — CLASSIFICATION
+# ══════════════════════════════════════════════════════════════════════════════
 with tab4:
-    st.markdown('<div class="section-title">Random Forest — Classification Sain / À Risque</div>',
-                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-title">Random Forest — Classification Sain / À Risque</div>',
+        unsafe_allow_html=True,
+    )
 
-    # FIX 5: need at least MIN_ROWS_ML rows for train/test split + RF
     if len(df) < MIN_ROWS_ML:
         st.warning(
             f"Au moins {MIN_ROWS_ML} enregistrements sont nécessaires pour la classification. "
-            f"Actuellement : {len(df)} ligne(s). Veuillez ajouter plus de données via le formulaire."
+            f"Actuellement : {len(df)} ligne(s). "
+            "Veuillez ajouter plus de données via le formulaire."
         )
     else:
         clf, report, cm, importances, y_te, y_pred_rf = run_random_forest(df)
@@ -702,23 +802,33 @@ with tab4:
                 index=["Réel : Healthy", "Réel : At Risk"],
                 columns=["Prédit : Healthy", "Prédit : At Risk"],
             )
-            fig = px.imshow(cm_df, text_auto=True, color_continuous_scale=SEQ_BLUES,
-                            title="Matrice de Confusion", **PLOTLY_THEME)
+            fig = px.imshow(
+                cm_df, text_auto=True,
+                color_continuous_scale=SEQ_BLUES,
+                title="Matrice de Confusion",
+                **PLOTLY_THEME,
+            )
             fig.update_coloraxes(showscale=False)
             fig.update_layout(xaxis=dict(side="bottom"))
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
-            fig = px.bar(x=list(importances.keys()), y=list(importances.values()),
-                         color=list(importances.values()), color_continuous_scale=SEQ_VIRIDIS,
-                         labels={"x": "Variable", "y": "Importance relative"},
-                         title="Importance des Variables (Gini)", **PLOTLY_THEME)
+            fig = px.bar(
+                x=list(importances.keys()), y=list(importances.values()),
+                color=list(importances.values()),
+                color_continuous_scale=SEQ_VIRIDIS,
+                labels={"x": "Variable", "y": "Importance relative"},
+                title="Importance des Variables (Gini)",
+                **PLOTLY_THEME,
+            )
             fig.update_coloraxes(showscale=False)
             fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown('<div class="section-title">Métriques de Classification</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-title">Métriques de Classification</div>',
+            unsafe_allow_html=True,
+        )
         metrics = []
         for label in ["Healthy", "At Risk"]:
             if label in report:
@@ -733,100 +843,142 @@ with tab4:
         st.dataframe(pd.DataFrame(metrics), use_container_width=True, hide_index=True)
         st.metric("Précision globale (Accuracy)", f"{report.get('accuracy', 0)*100:.1f}%")
 
-        st.markdown('<div class="section-title">Frontière de Décision — Projection ACP 2D</div>',
-                    unsafe_allow_html=True)
-        X_sc2 = StandardScaler().fit_transform(df[FEATURES])
-        proj  = PCA(n_components=2).fit_transform(X_sc2)
+        # ── Decision boundary via PCA projection ──────────────────────────
+        st.markdown(
+            '<div class="section-title">Frontière de Décision — Projection ACP 2D</div>',
+            unsafe_allow_html=True,
+        )
+        X_sc2  = StandardScaler().fit_transform(df[FEATURES])
+        proj   = PCA(n_components=2).fit_transform(X_sc2)
         df_proj = pd.DataFrame(proj, columns=["PC1", "PC2"])
         df_proj["Prédit"] = clf.predict(df[FEATURES])
         df_proj["Réel"]   = df["health_status"].values
 
-        fig6 = px.scatter(df_proj, x="PC1", y="PC2",
-                          color="Prédit", symbol="Réel",
-                          color_discrete_map={"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK},
-                          title="Classification projetée sur les 2 premières composantes principales",
-                          **PLOTLY_THEME)
-        fig6.update_traces(marker=dict(size=7, opacity=0.70, line=dict(width=0.5, color="white")))
-        fig6.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02))
-        st.plotly_chart(fig6, use_container_width=True)
-        st.markdown(
-            '<div class="info-box">📌 <b>Modèle :</b> Random Forest (200 arbres, split 75/25). '
-            'La projection ACP 2D permet de visualiser la séparation entre classes. '
-            'Les formes distinctes différencient les vrais labels des prédictions du modèle.</div>',
-            unsafe_allow_html=True,
-        )
+        # Guard: PCA scatter needs variance on both axes
+        if not df_proj.empty and df_proj["PC1"].nunique() > 1 and df_proj["PC2"].nunique() > 1:
+            fig6 = px.scatter(
+                df_proj, x="PC1", y="PC2",
+                color="Prédit", symbol="Réel",
+                color_discrete_map={"Healthy": CLR_HEALTHY, "At Risk": CLR_AT_RISK},
+                title="Classification projetée sur les 2 premières composantes principales",
+                **PLOTLY_THEME,
+            )
+            fig6.update_traces(
+                marker=dict(size=7, opacity=0.70, line=dict(width=0.5, color="white"))
+            )
+            fig6.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            st.plotly_chart(fig6, use_container_width=True)
+            st.markdown(
+                '<div class="info-box">📌 <b>Modèle :</b> Random Forest (200 arbres, split 75/25). '
+                'La projection ACP 2D visualise la séparation entre classes. '
+                'Les formes distinctes différencient vrais labels et prédictions.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            _insufficient()
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  TAB 5 — CLUSTERING  (FIX 5: len(df) < 3 guard)
-# ─────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  TAB 5 — CLUSTERING
+# ══════════════════════════════════════════════════════════════════════════════
 with tab5:
-    st.markdown('<div class="section-title">K-Means — Profils Émotionnels</div>',
-                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-title">K-Means — Profils Émotionnels</div>',
+        unsafe_allow_html=True,
+    )
 
-    # FIX 5: need at least MIN_ROWS_ML rows for KMeans
     if len(df) < MIN_ROWS_ML:
         st.warning(
             f"Au moins {MIN_ROWS_ML} enregistrements sont nécessaires pour le clustering. "
-            f"Actuellement : {len(df)} ligne(s). Veuillez ajouter plus de données via le formulaire."
+            f"Actuellement : {len(df)} ligne(s). "
+            "Veuillez ajouter plus de données via le formulaire."
         )
     else:
-        # Cap k so it never exceeds the number of samples
         max_k = min(6, len(df))
         k = st.slider("Nombre de clusters K", 2, max_k, min(3, max_k), key="k_slider")
         labels_km, _ = run_kmeans(df, k=k)
         df_cluster = df.copy()
         df_cluster["cluster"] = [f"Profil {c+1}" for c in labels_km]
 
-        # ── Elbow ──
-        st.markdown('<div class="section-title">Méthode du Coude (Elbow Method)</div>',
-                    unsafe_allow_html=True)
+        # ── Elbow ──────────────────────────────────────────────────────────
+        st.markdown(
+            '<div class="section-title">Méthode du Coude (Elbow Method)</div>',
+            unsafe_allow_html=True,
+        )
         X_sc_km   = StandardScaler().fit_transform(df[FEATURES + [TARGET]])
         max_elbow = min(9, len(df) + 1)
         inertias  = [
             KMeans(n_clusters=ki, random_state=42, n_init=10).fit(X_sc_km).inertia_
             for ki in range(2, max_elbow)
         ]
-        fig_elbow = px.line(x=list(range(2, max_elbow)), y=inertias, markers=True,
-                            labels={"x": "Nombre de clusters K",
-                                    "y": "Inertie (Within-cluster SS)"},
-                            title="Méthode du Coude — Choix optimal de K",
-                            color_discrete_sequence=[CLR_MAIN], **PLOTLY_THEME)
+        fig_elbow = px.line(
+            x=list(range(2, max_elbow)), y=inertias,
+            markers=True,
+            labels={"x": "Nombre de clusters K", "y": "Inertie (Within-cluster SS)"},
+            title="Méthode du Coude — Choix optimal de K",
+            color_discrete_sequence=[CLR_MAIN],
+            **PLOTLY_THEME,
+        )
         fig_elbow.update_traces(marker=dict(size=8, color=CLR_MAIN))
-        fig_elbow.add_vline(x=k, line_dash="dash", line_color=CLR_AT_RISK,
-                            annotation_text=f"K={k} sélectionné",
-                            annotation_position="top right",
-                            annotation_font_color=CLR_AT_RISK)
+        fig_elbow.add_vline(
+            x=k, line_dash="dash", line_color=CLR_AT_RISK,
+            annotation_text=f"K={k} sélectionné",
+            annotation_position="top right",
+            annotation_font_color=CLR_AT_RISK,
+        )
         st.plotly_chart(fig_elbow, use_container_width=True)
 
         col1, col2 = st.columns(2)
+
+        # ── Cluster scatter: sleep vs mood ─────────────────────────────────
         with col1:
-            fig7 = px.scatter(df_cluster, x="sleep_hours", y="mood_score",
-                              color="cluster", size="stress",
-                              hover_data=["social_interaction", "health_status"],
-                              title="Clusters — Sommeil vs Score d'Humeur",
-                              color_discrete_sequence=QUAL_PALETTE, **PLOTLY_THEME)
-            fig7.update_traces(marker=dict(opacity=0.75, line=dict(width=0.4, color="white")))
-            st.plotly_chart(fig7, use_container_width=True)
+            if not df_cluster.empty and df_cluster["sleep_hours"].nunique() > 1 and df_cluster["mood_score"].nunique() > 1:
+                fig7 = px.scatter(
+                    df_cluster, x="sleep_hours", y="mood_score",
+                    color="cluster", size="stress",
+                    hover_data=["social_interaction", "health_status"],
+                    title="Clusters — Sommeil vs Score d'Humeur",
+                    color_discrete_sequence=QUAL_PALETTE,
+                    **PLOTLY_THEME,
+                )
+                fig7.update_traces(
+                    marker=dict(opacity=0.75, line=dict(width=0.4, color="white"))
+                )
+                st.plotly_chart(fig7, use_container_width=True)
+            else:
+                _insufficient()
 
+        # ── Cluster scatter: stress vs social ──────────────────────────────
         with col2:
-            fig8 = px.scatter(df_cluster, x="stress", y="social_interaction",
-                              color="cluster", size="mood_score",
-                              title="Clusters — Stress vs Interaction Sociale",
-                              color_discrete_sequence=QUAL_PALETTE, **PLOTLY_THEME)
-            fig8.update_traces(marker=dict(opacity=0.75, line=dict(width=0.4, color="white")))
-            st.plotly_chart(fig8, use_container_width=True)
+            if not df_cluster.empty and df_cluster["stress"].nunique() > 1 and df_cluster["social_interaction"].nunique() > 1:
+                fig8 = px.scatter(
+                    df_cluster, x="stress", y="social_interaction",
+                    color="cluster", size="mood_score",
+                    title="Clusters — Stress vs Interaction Sociale",
+                    color_discrete_sequence=QUAL_PALETTE,
+                    **PLOTLY_THEME,
+                )
+                fig8.update_traces(
+                    marker=dict(opacity=0.75, line=dict(width=0.4, color="white"))
+                )
+                st.plotly_chart(fig8, use_container_width=True)
+            else:
+                _insufficient()
 
-        # ── Radar ──
-        st.markdown('<div class="section-title">Profil Radar des Centroides</div>',
-                    unsafe_allow_html=True)
+        # ── Radar: centroid profiles ───────────────────────────────────────
+        st.markdown(
+            '<div class="section-title">Profil Radar des Centroides</div>',
+            unsafe_allow_html=True,
+        )
         cluster_means = df_cluster.groupby("cluster")[FEATURES + [TARGET]].mean()
         vars_radar    = FEATURES + [TARGET]
 
         fig_radar = go.Figure()
         for i, (clust, row) in enumerate(cluster_means.iterrows()):
             vals = row[vars_radar].tolist() + [row[vars_radar[0]]]
-            cats = ([v.replace("_", " ").title() for v in vars_radar]
-                    + [vars_radar[0].replace("_", " ").title()])
+            cats = (
+                [v.replace("_", " ").title() for v in vars_radar]
+                + [vars_radar[0].replace("_", " ").title()]
+            )
             fig_radar.add_trace(go.Scatterpolar(
                 r=vals, theta=cats, fill="toself", name=clust,
                 line=dict(color=QUAL_PALETTE[i % len(QUAL_PALETTE)], width=2),
@@ -846,16 +998,18 @@ with tab5:
         )
         st.plotly_chart(fig_radar, use_container_width=True)
 
-        # ── Summary table ──
-        st.markdown('<div class="section-title">Tableau Résumé des Clusters</div>',
-                    unsafe_allow_html=True)
+        # ── Summary table ──────────────────────────────────────────────────
+        st.markdown(
+            '<div class="section-title">Tableau Résumé des Clusters</div>',
+            unsafe_allow_html=True,
+        )
         summary = df_cluster.groupby("cluster").agg(
             Participants        =("mood_score",         "count"),
-            Humeur_moyenne      =("mood_score",         lambda x: round(x.mean(), 1)),
-            Sommeil_moyen       =("sleep_hours",         lambda x: round(x.mean(), 1)),
-            Stress_moyen        =("stress",              lambda x: round(x.mean(), 1)),
-            Interaction_sociale =("social_interaction",  lambda x: round(x.mean(), 1)),
-            Pct_Sains           =("health_status",       lambda x: f"{(x=='Healthy').mean()*100:.0f}%"),
+            Humeur_moyenne      =("mood_score",          lambda x: round(x.mean(), 1)),
+            Sommeil_moyen       =("sleep_hours",          lambda x: round(x.mean(), 1)),
+            Stress_moyen        =("stress",               lambda x: round(x.mean(), 1)),
+            Interaction_sociale =("social_interaction",   lambda x: round(x.mean(), 1)),
+            Pct_Sains           =("health_status",        lambda x: f"{(x=='Healthy').mean()*100:.0f}%"),
         ).reset_index()
         st.dataframe(summary, use_container_width=True, hide_index=True)
         st.markdown(
