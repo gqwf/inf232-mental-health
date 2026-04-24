@@ -429,7 +429,8 @@ with tab1:
     st.markdown('<div class="section-title">Distribution des variables</div>', unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
-    with col1:
+ with col1:
+        # Check for variety in mood scores before graphing
         if not df.empty and df['mood_score'].nunique() > 1:
             fig = px.histogram(df, x="mood_score", nbins=10,
                                color_discrete_sequence=[CLR_MAIN],
@@ -442,6 +443,7 @@ with tab1:
             st.info("📊 Les graphiques s'afficheront avec plus de données variées.")
 
     with col2:
+        # Check for variety in sleep hours before graphing
         if not df.empty and df['sleep_hours'].nunique() > 1:
             fig = px.histogram(df, x="sleep_hours", nbins=10,
                                color_discrete_sequence=[CLR_SECONDARY],
