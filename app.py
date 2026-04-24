@@ -427,8 +427,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ─────────────────────────────────────────────────────────────────────────────
 with tab1:
     st.markdown('<div class="section-title">Distribution des variables</div>', unsafe_allow_html=True)
-
-  col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
     with col1:
         if not df.empty and df['mood_score'].nunique() > 1:
             fig = px.histogram(df, x="mood_score", nbins=10,
@@ -448,7 +447,6 @@ with tab1:
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("📊 En attente de données.")
-            
     col3, col4 = st.columns(2)
     with col3:
         fig = px.pie(df, names="health_status", color="health_status",
