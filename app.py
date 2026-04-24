@@ -430,7 +430,7 @@ with tab1:
 
     col1, col2 = st.columns(2)
     with col1:
-       # Safely render the mood histogram
+      # FIX: Check for data variety before drawing the histogram
         if not df.empty and df['mood_score'].nunique() > 1:
             fig = px.histogram(df, x="mood_score", nbins=10,
                                color_discrete_sequence=[CLR_MAIN],
@@ -440,7 +440,7 @@ with tab1:
             fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("💡 Ajoutez des scores variés pour voir la distribution.")
+            st.info("📊 Les graphiques de distribution s'afficheront dès que les participants auront des scores d'humeur variés.")
 
     with col2:
         fig = px.histogram(df, x="sleep_hours", nbins=20,
