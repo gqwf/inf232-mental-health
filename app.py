@@ -430,13 +430,17 @@ with tab1:
 
     col1, col2 = st.columns(2)
     with col1:
-        fig = px.histogram(df, x="mood_score", nbins=5,
-                           color_discrete_sequence=[CLR_MAIN],
-                           title="Distribution du Score d'Humeur",
-                           labels={"mood_score": "Score d'humeur"}, **PLOTLY_THEME)
-        fig.update_traces(opacity=0.80, marker_line_color="white", marker_line_width=0.5)
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+       # Safely render the mood histogram
+        if not df.empty and df['mood_score'].nunique() > 1:
+            fig = px.histogram(df, x="mood_score", nbins=10,
+                               color_discrete_sequence=[CLR_MAIN],
+                               title="Distribution du Score d'Humeur",
+                               labels={"mood_score": "Score d'humeur"}, **PLOTLY_THEME)
+            fig.update_traces(opacity=0.80, marker_line_color="white", marker_line_width=0.5)
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("💡 Ajoutez des scores variés pour voir la distribution.")
 
     with col2:
         fig = px.histogram(df, x="sleep_hours", nbins=20,
